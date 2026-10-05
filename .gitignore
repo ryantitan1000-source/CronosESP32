@@ -1,0 +1,16 @@
+# Compilación de PlatformIO
+.pio/
+.vscode/
+
+# Registros de las pruebas por USB
+logs/
+
+# Respaldo binario de la flash original (queda solo en la PC)
+backup/*.bin
+
+# Configuración local de Claude Code
+.claude/
+
+# Python
+__pycache__/
+*.pyc
