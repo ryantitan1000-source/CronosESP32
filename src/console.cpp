@@ -15,6 +15,7 @@ namespace {
 
 char lineBuf[160];
 size_t lineLen = 0;
+bool lineOverflow = false;
 
 enum class Wait { kOk, kTimeout, kCancelled, kCommError };
 
@@ -43,7 +44,8 @@ Wait waitFinger(uint32_t timeoutMs) {
   const uint32_t start = millis();
   uint32_t lastNotice = start;
   uint8_t commErrors = 0;
-  while (millis() - start < timeoutMs) {
+  for (;;) {
+    if (millis() - start >= timeoutMs) break;
     feedLoopWDT();
     if (cancelRequested()) return Wait::kCancelled;
     const Status s = sensor.capture();
@@ -53,10 +55,11 @@ Wait waitFinger(uint32_t timeoutMs) {
     } else {
       commErrors = 0;
     }
-    if (millis() - lastNotice >= 5000) {
+    const uint32_t elapsed = millis() - start;
+    if (millis() - lastNotice >= 5000 && elapsed < timeoutMs) {
       lastNotice = millis();
       Serial.printf("  ...esperando dedo (quedan %lu s; cualquier tecla + Enter cancela)\n",
-                    static_cast<unsigned long>((timeoutMs - (millis() - start)) / 1000));
+                    static_cast<unsigned long>((timeoutMs - elapsed) / 1000));
     }
     delay(60);
   }
@@ -98,9 +101,10 @@ uint16_t capacity() {
 
 bool parseUInt(const char* s, uint32_t& out) {
   if (!s || !*s) return false;
+  if (!isdigit(static_cast<unsigned char>(*s))) return false;  // rechaza '-' y '+'
   char* end = nullptr;
   const unsigned long v = strtoul(s, &end, 10);
-  if (*end != '\0') return false;
+  if (*end != '\0' || v > 0xFFFFUL) return false;
   out = static_cast<uint32_t>(v);
   return true;
 }
@@ -228,7 +232,11 @@ bool captureTemplate(uint8_t bufferId, const char* prompt) {
     }
     Serial.printf("  Imagen no util (%s). Retira el dedo y proba de nuevo (intento %d/3).\n",
                   fp::codeText(sensor.lastCode()), attempt);
-    waitRelease(15000);
+    const Wait r = waitRelease(15000);
+    if (r != Wait::kOk) {
+      printWait(r);
+      return false;
+    }
   }
   return false;
 }
@@ -252,12 +260,20 @@ void cmdEnroll(const char* arg) {
     return;
   }
   const uint16_t cap = capacity();
-  if (cap && id >= cap) {
+  if (cap == 0) {
+    Serial.println("Capacidad del lector desconocida: ejecuta 'info' primero.");
+    return;
+  }
+  if (id >= cap) {
     Serial.printf("ID fuera de rango: debe ser de 0 a %u.\n", cap - 1);
     return;
   }
   bool used = false;
-  if (slotUsed(static_cast<uint16_t>(id), used) && used) {
+  if (!slotUsed(static_cast<uint16_t>(id), used)) {
+    Serial.println("No se pudo verificar si la posicion esta libre: registro cancelado.");
+    return;
+  }
+  if (used) {
     Serial.printf("La posicion %lu ya tiene una huella. Borrala antes con: borrar %lu\n",
                   static_cast<unsigned long>(id), static_cast<unsigned long>(id));
     return;
@@ -357,7 +373,11 @@ void cmdDelete(const char* arg) {
     return;
   }
   const uint16_t cap = capacity();
-  if (cap && id >= cap) {
+  if (cap == 0) {
+    Serial.println("Capacidad del lector desconocida: ejecuta 'info' primero.");
+    return;
+  }
+  if (id >= cap) {
     Serial.printf("ID fuera de rango: debe ser de 0 a %u.\n", cap - 1);
     return;
   }
@@ -388,6 +408,7 @@ void cmdAccess(const char* arg) {
   }
   if (strcmp(arg, "on") == 0 || strcmp(arg, "si") == 0) {
     settings.accessOn = true;
+    accessCtl.clearFailures();
   } else if (strcmp(arg, "off") == 0 || strcmp(arg, "no") == 0) {
     settings.accessOn = false;
   } else {
@@ -489,7 +510,10 @@ void cmdRaw(const char* rest) {
     if (hi < 0) {
       hi = v;
     } else {
-      if (n >= sizeof tx) break;
+      if (n >= sizeof tx) {
+        Serial.println("Maximo 64 bytes: no se envio nada.");
+        return;
+      }
       tx[n++] = static_cast<uint8_t>((hi << 4) | v);
       hi = -1;
     }
@@ -567,18 +591,28 @@ void consolePoll() {
   while (Serial.available()) {
     const int c = Serial.read();
     if (c == '\r' || c == '\n') {
-      if (lineLen) {
+      if (lineOverflow) {
+        Serial.printf("Linea demasiado larga (maximo %u caracteres): no se ejecuto.\n",
+                      static_cast<unsigned>(sizeof lineBuf - 1));
+      } else if (lineLen) {
         lineBuf[lineLen] = '\0';
         execute(lineBuf);
-        lineLen = 0;
       }
+      lineLen = 0;
+      lineOverflow = false;
       continue;
     }
     if (c == 8 || c == 127) {
       if (lineLen) --lineLen;
       continue;
     }
-    if (c >= 32 && c < 127 && lineLen < sizeof lineBuf - 1) lineBuf[lineLen++] = static_cast<char>(c);
+    if (c >= 32 && c < 127) {
+      if (lineLen < sizeof lineBuf - 1) {
+        lineBuf[lineLen++] = static_cast<char>(c);
+      } else {
+        lineOverflow = true;
+      }
+    }
   }
 }
 
@@ -619,8 +653,12 @@ void printStatus() {
                 static_cast<unsigned long>(sensor.baud()));
   if (readerParamsValid) Serial.printf(", capacidad %u", readerParams.librarySize);
   Serial.println();
-  Serial.printf("  Modo acceso: %s | estado: %s | fallos seguidos: %u", settings.accessOn ? "ACTIVADO" : "DESACTIVADO",
-                accessStateName(accessCtl.state()), accessCtl.failCount());
+  if (settings.accessOn) {
+    Serial.printf("  Modo acceso: ACTIVADO | estado: %s | fallos seguidos: %u", accessStateName(accessCtl.state()),
+                  accessCtl.failCount());
+  } else {
+    Serial.print("  Modo acceso: DESACTIVADO (mantenimiento: no se evaluan huellas)");
+  }
   if (accessCtl.state() == AccessController::State::kLockout) {
     Serial.printf(" | bloqueo restante %lu s", static_cast<unsigned long>(accessCtl.lockoutRemainingMs(now) / 1000));
   }

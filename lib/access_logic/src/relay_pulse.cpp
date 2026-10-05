@@ -27,6 +27,9 @@ RelayPulse::Request RelayPulse::request(uint32_t nowMs) {
 }
 
 bool RelayPulse::update(uint32_t nowMs) {
+  // Un 'now' anterior al inicio (leído antes de request()) no debe apagar el pulso:
+  // sin esta guarda la resta sin signo da la vuelta y lo cortaría al instante.
+  if (active_ && static_cast<int32_t>(nowMs - startMs_) < 0) return active_;
   if (active_ && static_cast<uint32_t>(nowMs - startMs_) >= pulseMs_) {
     active_ = false;
     endMs_ = startMs_ + pulseMs_;

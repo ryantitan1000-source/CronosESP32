@@ -24,7 +24,11 @@ Preferences prefs;
 uint32_t lastAccessStep = 0;
 uint32_t lastHealthPing = 0;
 uint32_t lastImageErrorLog = 0;
-uint32_t deniedBlinkUntil = 0;
+bool deniedBlinkActive = false;
+uint32_t deniedBlinkStart = 0;
+bool relayLogicWasActive = false;
+uint32_t relayLogicEndMs = 0;
+uint8_t healthFailures = 0;
 
 // ------------------------------------------------------------------ ajustes
 
@@ -57,9 +61,10 @@ void ledWrite(bool on) {
 void ledUpdate(uint32_t now) {
   bool on;
   const uint32_t phase = now % 2000;
+  if (deniedBlinkActive && now - deniedBlinkStart >= 1000) deniedBlinkActive = false;
   if (relayhw::isActive()) {
     on = true;
-  } else if (static_cast<int32_t>(deniedBlinkUntil - now) > 0) {
+  } else if (deniedBlinkActive && now - deniedBlinkStart < 1000) {
     on = (now / 80) % 2 == 0;
   } else if (!readerOnline) {
     on = (now % 250) < 125;
@@ -126,8 +131,11 @@ void handleAccessEvent(const AccessEvent& e, uint32_t now) {
 
 void relayHousekeeping(uint32_t now) {
   const bool logicActive = relayLogic.update(now);
-  // Respaldo: si la lógica ya terminó y el pin sigue activo, apagarlo.
-  if (!logicActive && relayhw::isActive()) {
+  if (relayLogicWasActive && !logicActive) relayLogicEndMs = now;
+  relayLogicWasActive = logicActive;
+  // Respaldo: el esp_timer apaga el pin a tiempo. Si 20 ms después de que la
+  // lógica terminó el pin sigue activo, algo falló: apagarlo y avisar.
+  if (!logicActive && relayhw::isActive() && now - relayLogicEndMs > 20) {
     relayhw::off();
     Serial.println("[RELE] aviso: apagado de respaldo desde loop()");
   }
@@ -145,6 +153,8 @@ void printBanner() {
 #else
   Serial.printf(" Rele: SIMULACION (GPIO%d fijo en reposo = %s)\n", PIN_RELAY,
                 relayhw::restLevel() ? "ALTO" : "BAJO 0 V");
+  Serial.println(" (Con transistor NPN, 0 V = rele apagado. Si IN fuera directo o solo con");
+  Serial.println("  resistencia a GPIO4, 0 V lo ACTIVARIA: usar siempre el transistor.)");
 #endif
   Serial.printf(" Pulso: %lu ms | Puntaje minimo: %u | Acceso automatico: %s\n",
                 static_cast<unsigned long>(settings.pulseMs), settings.minScore,
@@ -176,7 +186,10 @@ void settingsSave() {
   prefs.end();
 }
 
-void ledSignalDenied() { deniedBlinkUntil = millis() + 1000; }
+void ledSignalDenied() {
+  deniedBlinkActive = true;
+  deniedBlinkStart = millis();
+}
 
 bool readerConnect(bool verbose) {
   if (sensor.baud() != settings.fpBaud) sensor.setBaud(settings.fpBaud);
@@ -305,9 +318,9 @@ void setup() {
 
 void loop() {
   feedLoopWDT();
-  const uint32_t now = millis();
-
   consolePoll();
+  // El tiempo se lee DESPUES de la consola: un comando puede haber iniciado un pulso.
+  const uint32_t now = millis();
   relayHousekeeping(now);
   ledUpdate(now);
 
@@ -325,14 +338,19 @@ void loop() {
   } else if (now - lastHealthPing >= HEALTH_PING_MS) {
     lastHealthPing = now;
     const bool ok = sensor.ping();
-    if (ok && !readerOnline) {
-      Serial.println("[LECTOR] volvio a responder.");
-      readerConnect(true);
-    } else if (!ok && readerOnline) {
+    if (ok) {
+      healthFailures = 0;
+      if (!readerOnline) {
+        Serial.println("[LECTOR] volvio a responder.");
+        readerConnect(true);
+      }
+    } else if (readerOnline && ++healthFailures >= ACCESS_COMM_ERRORS_OFFLINE) {
+      // Igual que en modo acceso: varios fallos seguidos, no uno aislado.
+      healthFailures = 0;
       readerOnline = false;
       relayhw::off();
       relayLogic.forceOff(now);
-      Serial.println("[LECTOR] DESCONECTADO: no responde a la verificacion periodica.");
+      Serial.println("[LECTOR] DESCONECTADO: no responde a la verificacion periodica (3 intentos).");
     }
   }
   delay(2);

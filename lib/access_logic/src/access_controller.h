@@ -60,6 +60,8 @@ class AccessController {
   // El lector volvió a responder por otra vía: salir de DESCONECTADO
   // (pasa a esperar retiro del dedo, nunca evalúa directamente).
   void markOnline();
+  // Borra el contador de denegaciones seguidas (p. ej. al activar el modo acceso).
+  void clearFailures() { fails_ = 0; }
 
   State state() const { return state_; }
   uint8_t failCount() const { return fails_; }

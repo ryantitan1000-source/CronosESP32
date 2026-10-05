@@ -93,6 +93,16 @@ void test_relay_pulse_survives_millis_wraparound() {
   TEST_ASSERT_EQUAL(RelayPulse::Request::kStarted, r.request(t0 + 1500));
 }
 
+void test_relay_update_with_time_before_start_does_not_cut_pulse() {
+  // Caso de la auditoría: loop() leía 'now' antes de que la consola iniciara el pulso.
+  RelayPulse r(1000, 500, 100, 10000);
+  TEST_ASSERT_EQUAL(RelayPulse::Request::kStarted, r.request(5000));
+  TEST_ASSERT_TRUE(r.update(4999));  // tiempo viejo: el pulso sigue activo
+  TEST_ASSERT_TRUE(r.update(5500));
+  TEST_ASSERT_FALSE(r.update(6000));
+  TEST_ASSERT_EQUAL(RelayPulse::Request::kCooldown, r.request(6200));  // el enfriamiento se respeta
+}
+
 void test_relay_force_off() {
   RelayPulse r(5000, 0, 100, 10000);
   r.request(0);
@@ -316,6 +326,7 @@ void setup() {
   RUN_TEST(test_relay_pulse_no_retrigger_while_active_and_cooldown);
   RUN_TEST(test_relay_pulse_clamps_duration);
   RUN_TEST(test_relay_pulse_survives_millis_wraparound);
+  RUN_TEST(test_relay_update_with_time_before_start_does_not_cut_pulse);
   RUN_TEST(test_relay_force_off);
   RUN_TEST(test_access_no_finger_does_nothing);
   RUN_TEST(test_access_authorized_grants_once_while_finger_held);

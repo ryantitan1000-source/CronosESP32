@@ -1,5 +1,7 @@
-// Pruebas en la placa sin periféricos: temporizador de apagado del relé
-// (en SIMULACIÓN: GPIO4 queda en reposo 0 V todo el tiempo) y lectura del pin.
+// Pruebas en la placa sin periféricos: temporizador de apagado del relé en
+// SIMULACIÓN. Ninguna prueba de esta suite pone GPIO4 en ALTO: el pin queda en
+// reposo (0 V) todo el tiempo, así que es segura aunque el transistor y el relé
+// estén conectados. Las pruebas que mueven el pin están en test_hw_gpio4.
 #include <Arduino.h>
 #include <unity.h>
 
@@ -29,6 +31,7 @@ void test_relay_timer_turns_off_while_loop_is_blocked() {
   delay(100);
   TEST_ASSERT_FALSE(relayhw::isActive());
   TEST_ASSERT_EQUAL_UINT32(before + 1, relayhw::activations());
+  TEST_ASSERT_EQUAL_INT(0, relayhw::padLevel());
 }
 
 void test_relay_ignores_retrigger_while_active() {
@@ -41,45 +44,12 @@ void test_relay_ignores_retrigger_while_active() {
   TEST_ASSERT_EQUAL_UINT32(before + 1, relayhw::activations());
 }
 
-void test_gpio4_diag_high_low_readback() {
-  // Prueba eléctrica interna: el pad debe seguir al nivel ordenado.
-  // (Requiere IN del relé DESCONECTADO.)
-  relayhw::init(PIN_RELAY, false, 1);
-  TEST_ASSERT_TRUE(relayhw::diagSet(1, 1000));
-  delay(5);
-  TEST_ASSERT_EQUAL_INT(1, relayhw::padLevel());
-  TEST_ASSERT_TRUE(relayhw::diagActive());
-  TEST_ASSERT_TRUE(relayhw::diagSet(0, 0));
-  delay(5);
-  TEST_ASSERT_EQUAL_INT(0, relayhw::padLevel());
-  TEST_ASSERT_FALSE(relayhw::diagActive());
-}
-
-void test_gpio4_diag_auto_returns_to_rest() {
-  relayhw::init(PIN_RELAY, false, 1);
-  relayhw::diagSet(1, 200);
-  delay(260);
-  TEST_ASSERT_EQUAL_INT(0, relayhw::commandedLevel());
-  TEST_ASSERT_EQUAL_INT(0, relayhw::padLevel());
-}
-
-void test_pulse_cancels_manual_diag() {
-  relayhw::init(PIN_RELAY, false, 1);
-  relayhw::diagSet(1, 60000);
-  relayhw::activate(100);
-  TEST_ASSERT_EQUAL_INT(0, relayhw::commandedLevel());
-  TEST_ASSERT_FALSE(relayhw::diagActive());
-}
-
 void setup() {
   delay(2500);
   UNITY_BEGIN();
   RUN_TEST(test_relay_sim_pin_stays_at_rest);
   RUN_TEST(test_relay_timer_turns_off_while_loop_is_blocked);
   RUN_TEST(test_relay_ignores_retrigger_while_active);
-  RUN_TEST(test_gpio4_diag_high_low_readback);
-  RUN_TEST(test_gpio4_diag_auto_returns_to_rest);
-  RUN_TEST(test_pulse_cancels_manual_diag);
   UNITY_END();
   relayhw::init(PIN_RELAY, false, 1);  // dejar el pin en reposo
 }

@@ -48,6 +48,9 @@ void init(int pinNum, bool outputEnabled, int activeLevel) {
   cfg.pull_down_en = rest ? GPIO_PULLDOWN_DISABLE : GPIO_PULLDOWN_ENABLE;
   cfg.intr_type = GPIO_INTR_DISABLE;
   gpio_config(&cfg);
+  // Fuerza de salida mínima (~5 mA): alcanza para la base del transistor
+  // (1 kΩ => ~2,5 mA) y protege el pin si la resistencia de base faltara.
+  gpio_set_drive_capability(g_pin, GPIO_DRIVE_CAP_0);
   drive(rest);
   g_isActive = false;
 
