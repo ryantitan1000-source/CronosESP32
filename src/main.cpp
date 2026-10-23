@@ -14,6 +14,7 @@ RelayPulse relayLogic(RELAY_PULSE_DEFAULT_MS, RELAY_COOLDOWN_MS, RELAY_PULSE_MIN
                       RELAY_PULSE_MAX_MS);
 AccessController accessCtl(sensor, AccessConfig{});
 Settings settings{RELAY_PULSE_DEFAULT_MS, ACCESS_MIN_SCORE_DEFAULT, false, FP_DEFAULT_BAUD};
+BlockList blockList;
 bool readerOnline = false;
 fp::SysParams readerParams{};
 bool readerParamsValid = false;
@@ -42,6 +43,13 @@ void settingsLoad() {
   settings.minScore = prefs.getUShort("minscore", ACCESS_MIN_SCORE_DEFAULT);
   settings.accessOn = prefs.getBool("acceso", false);
   settings.fpBaud = prefs.getUInt("baud", FP_DEFAULT_BAUD);
+  // Lista de huellas bloqueadas. Sin lista guardada (o dañada) no hay ninguna bloqueada.
+  blockList.clearAll();
+  if (prefs.isKey("bloq")) {
+    uint8_t buf[BlockList::kBytes];
+    const size_t got = prefs.getBytes("bloq", buf, sizeof buf);
+    if (got == sizeof buf) blockList.load(buf, got);
+  }
   prefs.end();
   if (!validBaud(settings.fpBaud)) settings.fpBaud = FP_DEFAULT_BAUD;
   settings.pulseMs = relayLogic.setPulseMs(settings.pulseMs);
@@ -83,6 +91,12 @@ void handleAccessEvent(const AccessEvent& e, uint32_t now) {
     case AccessEventType::kNone:
       break;
     case AccessEventType::kGranted:
+      if (blockList.isBlocked(e.id)) {
+        // La huella existe pero su acceso está suspendido (p. ej. membresía vencida).
+        Serial.printf("[ACCESO] BLOQUEADO: ID %u (puntaje %u). Acceso suspendido: no se abre.\n", e.id, e.score);
+        ledSignalDenied();
+        break;
+      }
       Serial.printf("[ACCESO] CONCEDIDO: ID %u (puntaje %u)\n", e.id, e.score);
       requestOpen("huella autorizada");
       break;
@@ -183,6 +197,12 @@ void settingsSave() {
   prefs.putUShort("minscore", settings.minScore);
   prefs.putBool("acceso", settings.accessOn);
   prefs.putUInt("baud", settings.fpBaud);
+  prefs.end();
+}
+
+void blockListSave() {
+  prefs.begin("cronos", false);
+  prefs.putBytes("bloq", blockList.data(), BlockList::kBytes);
   prefs.end();
 }
 

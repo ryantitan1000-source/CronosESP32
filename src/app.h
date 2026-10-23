@@ -4,6 +4,7 @@
 #include <Arduino.h>
 
 #include "access_controller.h"
+#include "block_list.h"
 #include "dy50_sensor.h"
 #include "relay_pulse.h"
 
@@ -18,11 +19,13 @@ extern Dy50Sensor sensor;
 extern AccessController accessCtl;
 extern RelayPulse relayLogic;
 extern Settings settings;
+extern BlockList blockList;  // huellas guardadas pero sin permiso de abrir
 extern bool readerOnline;
 extern fp::SysParams readerParams;
 extern bool readerParamsValid;
 
 void settingsSave();
+void blockListSave();
 bool readerConnect(bool verbose);
 void requestOpen(const char* reason);
 void ledSignalDenied();

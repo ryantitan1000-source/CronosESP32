@@ -126,6 +126,14 @@ bool runAndReport(const char* what, const fp::Command& cmd, uint32_t timeoutMs) 
 
 // ------------------------------------------------------------------ comandos
 
+// Una huella nueva o borrada nunca hereda el bloqueo de un ID anterior.
+void unblockSlot(uint16_t id) {
+  if (blockList.isBlocked(id)) {
+    blockList.set(id, false);
+    blockListSave();
+  }
+}
+
 void cmdInfo() {
   if (!requireReader()) return;
   fp::SysParams p{};
@@ -311,6 +319,7 @@ void cmdEnroll(const char* arg) {
     Serial.println("No se pudo guardar la huella.");
     return;
   }
+  unblockSlot(static_cast<uint16_t>(id));
   Serial.printf("HUELLA GUARDADA en ID %lu. Retira el dedo.\n", static_cast<unsigned long>(id));
   waitRelease(10000);
 }
@@ -331,8 +340,13 @@ void cmdIdentify() {
   uint16_t id = 0, score = 0;
   const Status s = sensor.searchAll(id, score);
   if (s == Status::kOk) {
-    Serial.printf("  COINCIDE con ID %u, puntaje %u%s\n", id, score,
-                  score >= settings.minScore ? "" : "  (por debajo del minimo: el modo acceso la RECHAZARIA)");
+    const char* nota = "";
+    if (blockList.isBlocked(id)) {
+      nota = "  (BLOQUEADA: el modo acceso NO abriria)";
+    } else if (score < settings.minScore) {
+      nota = "  (por debajo del minimo: el modo acceso la RECHAZARIA)";
+    }
+    Serial.printf("  COINCIDE con ID %u, puntaje %u%s\n", id, score, nota);
   } else if (s == Status::kNotFound) {
     Serial.println("  NO REGISTRADA: no coincide con ninguna huella guardada.");
   } else if (s == Status::kCommError) {
@@ -386,6 +400,7 @@ void cmdDelete(const char* arg) {
     Serial.printf("Aviso: la posicion %lu ya estaba vacia.\n", static_cast<unsigned long>(id));
   }
   if (runAndReport("Borrar (DeleteChar)", fp::deleteChar(static_cast<uint16_t>(id), 1), Dy50Sensor::kTimeoutFlash)) {
+    unblockSlot(static_cast<uint16_t>(id));
     Serial.printf("Huella ID %lu eliminada.\n", static_cast<unsigned long>(id));
   }
 }
@@ -397,8 +412,44 @@ void cmdDeleteAll(const char* arg) {
     return;
   }
   if (runAndReport("Vaciar base (Empty)", fp::empty(), Dy50Sensor::kTimeoutFlash)) {
+    if (blockList.count()) {
+      blockList.clearAll();
+      blockListSave();
+    }
     Serial.println("Base de huellas vacia.");
   }
+}
+
+// Bloquear: la huella sigue guardada pero no abre. Permitir: vuelve a abrir.
+void cmdBlock(const char* arg, bool block) {
+  uint32_t id = 0;
+  if (!parseUInt(arg, id) || id >= BlockList::kMaxIds) {
+    Serial.printf("Uso: %s <id>\n", block ? "bloquear" : "permitir");
+    return;
+  }
+  const uint16_t cap = capacity();
+  if (cap != 0 && id >= cap) {
+    Serial.printf("ID fuera de rango: debe ser de 0 a %u.\n", cap - 1);
+    return;
+  }
+  blockList.set(static_cast<uint16_t>(id), block);
+  blockListSave();
+  if (block) {
+    Serial.printf("ID %lu BLOQUEADO: su huella sigue guardada pero NO abre el molinete (guardado).\n",
+                  static_cast<unsigned long>(id));
+  } else {
+    Serial.printf("ID %lu PERMITIDO: su huella vuelve a abrir el molinete (guardado).\n",
+                  static_cast<unsigned long>(id));
+  }
+}
+
+void cmdBlocked() {
+  static uint16_t ids[BlockList::kMaxIds];
+  const size_t n = blockList.list(ids, BlockList::kMaxIds);
+  Serial.printf("Bloqueados (%u):", static_cast<unsigned>(n));
+  if (n == 0) Serial.print(" ninguno");
+  for (size_t i = 0; i < n; ++i) Serial.printf(" %u", ids[i]);
+  Serial.println();
 }
 
 void cmdAccess(const char* arg) {
@@ -560,6 +611,9 @@ void execute(char* line) {
   else if (!strcmp(cmd, "lista")) cmdList();
   else if (!strcmp(cmd, "borrar")) cmdDelete(a1);
   else if (!strcmp(cmd, "borrartodo")) cmdDeleteAll(a1);
+  else if (!strcmp(cmd, "bloquear")) cmdBlock(a1, true);
+  else if (!strcmp(cmd, "permitir")) cmdBlock(a1, false);
+  else if (!strcmp(cmd, "bloqueados")) cmdBlocked();
   else if (!strcmp(cmd, "acceso")) cmdAccess(a1);
   else if (!strcmp(cmd, "pulso")) cmdPulse(a1);
   else if (!strcmp(cmd, "puntaje")) cmdScore(a1);
@@ -630,6 +684,9 @@ void printHelp() {
       "  lista                 posiciones ocupadas\n"
       "  borrar <id>           elimina la huella <id>\n"
       "  borrartodo SI         elimina TODAS las huellas\n"
+      "  bloquear <id>         la huella sigue guardada pero NO abre el molinete (se guarda)\n"
+      "  permitir <id>         vuelve a permitir que esa huella abra\n"
+      "  bloqueados            lista de huellas bloqueadas\n"
       "  acceso on|off         modo acceso automatico (se guarda)\n"
       "  pulso <ms>            duracion del pulso de apertura, 100-10000 ms (se guarda)\n"
       "  puntaje <n>           puntaje minimo de coincidencia, 0 = criterio del lector (se guarda)\n"
@@ -653,6 +710,7 @@ void printStatus() {
                 static_cast<unsigned long>(sensor.baud()));
   if (readerParamsValid) Serial.printf(", capacidad %u", readerParams.librarySize);
   Serial.println();
+  Serial.printf("  Huellas bloqueadas: %u\n", blockList.count());
   if (settings.accessOn) {
     Serial.printf("  Modo acceso: ACTIVADO | estado: %s | fallos seguidos: %u", accessStateName(accessCtl.state()),
                   accessCtl.failCount());

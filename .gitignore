@@ -14,3 +14,12 @@ backup/*.bin
 # Python
 __pycache__/
 *.pyc
+
+# Datos personales y archivos locales (nunca subir)
+*.db
+*.db-journal
+*.csv
+*.lnk
+
+# Base de datos del panel (datos personales)
+data/

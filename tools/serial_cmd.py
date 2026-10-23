@@ -1,7 +1,7 @@
 """Envía comandos a la consola de CronosESP32 por USB y muestra la respuesta.
 
 Uso (con el Python de PlatformIO, que ya trae pyserial):
-  python tools/serial_cmd.py [--port COM10] [--reset] [--listen 3] [--wait 2] "estado" "info"
+  python tools/serial_cmd.py [--port COM3] [--reset] [--listen 3] [--wait 2] "estado" "info"
 
   --reset    reinicia la placa por USB (como el botón RST) y captura el arranque
   --listen   segundos a escuchar antes de enviar comandos (por defecto 1)
@@ -52,7 +52,7 @@ def open_port(port, timeout_s=10.0):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", default="COM10")
+    ap.add_argument("--port", default="COM3")
     ap.add_argument("--reset", action="store_true")
     ap.add_argument("--listen", type=float, default=1.0)
     ap.add_argument("--wait", type=float, default=2.0)

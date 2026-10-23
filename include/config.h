@@ -2,7 +2,7 @@
 #pragma once
 
 #define FW_NAME "CronosESP32"
-#define FW_VERSION "0.1.1"
+#define FW_VERSION "0.2.0"
 
 // ---------------------------------------------------------------- pines
 // ESP32-C3 SuperMini (cara de componentes, USB abajo):

@@ -5,7 +5,7 @@
 - Envía a la placa cada línea nueva que se agregue a logs/cmd.txt.
 - Termina cuando aparece el archivo logs/stop.
 
-Uso:  python tools/serial_bridge.py [--port COM10]
+Uso:  python tools/serial_bridge.py [--port COM3]
 """
 import argparse
 import os
@@ -42,7 +42,7 @@ def open_port(port):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--port", default="COM10")
+    ap.add_argument("--port", default="COM3")
     a = ap.parse_args()
     os.makedirs(BASE, exist_ok=True)
     if os.path.exists(STOP):

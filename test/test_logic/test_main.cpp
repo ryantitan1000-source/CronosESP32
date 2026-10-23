@@ -4,6 +4,7 @@
 #include <unity.h>
 
 #include "access_controller.h"
+#include "block_list.h"
 #include "relay_pulse.h"
 
 using Status = FingerPort::Status;
@@ -319,9 +320,93 @@ void test_access_min_score_zero_accepts_reader_decision() {
   TEST_ASSERT_EQUAL(AccessEventType::kGranted, a.step(0).type);
 }
 
+// ------------------------------------------------------------- lista de bloqueados
+
+void test_blocklist_default_allows_everyone() {
+  BlockList b;
+  TEST_ASSERT_EQUAL_UINT16(0, b.count());
+  TEST_ASSERT_FALSE(b.isBlocked(0));
+  TEST_ASSERT_FALSE(b.isBlocked(1));
+  TEST_ASSERT_FALSE(b.isBlocked(149));
+}
+
+void test_blocklist_block_and_unblock() {
+  BlockList b;
+  TEST_ASSERT_TRUE(b.set(5, true));
+  TEST_ASSERT_TRUE(b.isBlocked(5));
+  TEST_ASSERT_FALSE(b.isBlocked(4));
+  TEST_ASSERT_FALSE(b.isBlocked(6));
+  TEST_ASSERT_TRUE(b.set(5, false));
+  TEST_ASSERT_FALSE(b.isBlocked(5));
+  TEST_ASSERT_EQUAL_UINT16(0, b.count());
+}
+
+void test_blocklist_out_of_range_is_ignored() {
+  BlockList b;
+  TEST_ASSERT_FALSE(b.set(1024, true));
+  TEST_ASSERT_FALSE(b.set(65535, true));
+  TEST_ASSERT_FALSE(b.isBlocked(1024));
+  TEST_ASSERT_FALSE(b.isBlocked(65535));
+  TEST_ASSERT_TRUE(b.set(1023, true));
+  TEST_ASSERT_TRUE(b.isBlocked(1023));
+  TEST_ASSERT_EQUAL_UINT16(1, b.count());
+}
+
+void test_blocklist_list_is_ascending_and_limited() {
+  BlockList b;
+  b.set(150, true);
+  b.set(3, true);
+  b.set(7, true);
+  uint16_t ids[8] = {0};
+  TEST_ASSERT_EQUAL_UINT32(3, b.list(ids, 8));
+  TEST_ASSERT_EQUAL_UINT16(3, ids[0]);
+  TEST_ASSERT_EQUAL_UINT16(7, ids[1]);
+  TEST_ASSERT_EQUAL_UINT16(150, ids[2]);
+  TEST_ASSERT_EQUAL_UINT32(2, b.list(ids, 2));
+  TEST_ASSERT_EQUAL_UINT16(7, ids[1]);
+}
+
+void test_blocklist_save_and_restore() {
+  BlockList a;
+  a.set(9, true);
+  a.set(100, true);
+  BlockList b;
+  TEST_ASSERT_TRUE(b.load(a.data(), BlockList::kBytes));
+  TEST_ASSERT_TRUE(b.isBlocked(9));
+  TEST_ASSERT_TRUE(b.isBlocked(100));
+  TEST_ASSERT_FALSE(b.isBlocked(10));
+  TEST_ASSERT_EQUAL_UINT16(2, b.count());
+}
+
+void test_blocklist_bad_stored_size_leaves_everyone_allowed() {
+  BlockList a;
+  a.set(9, true);
+  BlockList b;
+  b.set(1, true);
+  TEST_ASSERT_FALSE(b.load(a.data(), BlockList::kBytes - 1));
+  TEST_ASSERT_EQUAL_UINT16(0, b.count());
+  TEST_ASSERT_FALSE(b.load(nullptr, BlockList::kBytes));
+}
+
+void test_blocklist_clear_all() {
+  BlockList b;
+  b.set(2, true);
+  b.set(800, true);
+  b.clearAll();
+  TEST_ASSERT_EQUAL_UINT16(0, b.count());
+  TEST_ASSERT_FALSE(b.isBlocked(800));
+}
+
 void setup() {
   delay(2500);
   UNITY_BEGIN();
+  RUN_TEST(test_blocklist_default_allows_everyone);
+  RUN_TEST(test_blocklist_block_and_unblock);
+  RUN_TEST(test_blocklist_out_of_range_is_ignored);
+  RUN_TEST(test_blocklist_list_is_ascending_and_limited);
+  RUN_TEST(test_blocklist_save_and_restore);
+  RUN_TEST(test_blocklist_bad_stored_size_leaves_everyone_allowed);
+  RUN_TEST(test_blocklist_clear_all);
   RUN_TEST(test_relay_pulse_turns_off_after_duration);
   RUN_TEST(test_relay_pulse_no_retrigger_while_active_and_cooldown);
   RUN_TEST(test_relay_pulse_clamps_duration);
